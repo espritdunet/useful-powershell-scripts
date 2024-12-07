@@ -1,0 +1,9 @@
+# OS specific
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE
+.vscode/
+!.vscode/settings.json
+!.vscode/launch.json
