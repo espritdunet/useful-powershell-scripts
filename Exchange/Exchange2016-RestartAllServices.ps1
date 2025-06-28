@@ -1,30 +1,40 @@
-<# 
-    .SYNOPSIS 
-    Restart all services on an Exchange 2016 server.
+<#
+.SYNOPSIS
+Redémarre de manière forcée tous les services essentiels pour Exchange 2016, y compris IIS.
+Script amélioré pour garantir un redémarrage effectif et sécurisé.
 
-    Created by espritdunet (Olivier Maréchal)
+Créé par espritdunet (Olivier Maréchal)
 
-    THIS CODE IS MADE AVAILABLE AS IS, WITHOUT WARRANTY OF ANY KIND. THE ENTIRE  
-    RISK OF THE USE OR THE RESULTS FROM THE USE OF THIS CODE REMAINS WITH THE USER. 
+THIS CODE IS MADE AVAILABLE AS IS, WITHOUT WARRANTY OF ANY KIND. THE ENTIRE
+RISK OF THE USE OR THE RESULTS FROM THE USE OF THIS CODE REMAINS WITH THE USER.
 
-    Version 1.0, 2024-04-02
+Version 1.1, 2025-06-28
 
-    .DESCRIPTION 
-    This script sets the startup type and restarts all Exchange services on a server. 
-    It handles both automatic and manual services, with error handling and logging.
+.DESCRIPTION
+Ce script effectue les actions suivantes :
+1. Vérifie qu'il est exécuté avec des privilèges d'administrateur.
+2. Pour les services définis comme 'automatiques', il configure leur démarrage sur 'Automatic' et les redémarre de manière forcée.
+3. Pour les services 'manuels', il configure leur démarrage sur 'Manual' et les redémarre uniquement s'ils étaient déjà en cours d'exécution.
+4. Inclut les services critiques comme IIS (W3SVC, IISADMIN) qui sont nécessaires au bon fonctionnement d'Exchange.
+5. Journalise chaque action pour un suivi clair.
 
-    .PARAMETER AutoServices  
-    List of services to set to Automatic startup and restart.
-
-    .PARAMETER ManualServices
-    List of services to set to Manual startup and restart if they are running.
-
-    .EXAMPLE 
-    Restart all Exchange services on the server.
-    .\Restart-ExchangeServices.ps1
+.EXAMPLE
+Exécutez le script dans une console PowerShell avec des droits d'administrateur sur le serveur Exchange.
+.\Exchange2016-RestartAllServices.ps1
 #>
 
-# List of Exchange services to set to Automatic startup and restart
+# --- Vérification des privilèges ---
+if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Error "Accès refusé. Ce script doit être exécuté avec des privilèges d'administrateur pour modifier les services."
+    # Attend que l'utilisateur appuie sur une touche pour fermer, pour qu'il puisse lire le message.
+    Read-Host "Appuyez sur Entrée pour quitter."
+    exit 1
+}
+
+# --- Listes des services ---
+
+# Services à configurer en démarrage Automatique et à redémarrer.
+# W3SVC et IISADMIN (IIS) sont inclus car ils sont critiques pour OWA, ECP et les services web Exchange.
 $autoServices = @(
     "MSExchangeADTopology",
     "MSExchangeAntispamUpdate",
@@ -58,16 +68,17 @@ $autoServices = @(
     "W3SVC"
 )
 
-# List of services to set to Manual startup and restart if they are running
+# Services à configurer en démarrage Manuel. Seront redémarrés uniquement s'ils sont en cours d'exécution.
 $manualServices = @(
     "MSExchangePop3",
     "MSExchangePOP3BE",
     "wsbexchange",
-    "AppIDSvc", # This service might require specific administrative rights to be modified.
+    "AppIDSvc", # Ce service peut nécessiter des droits spécifiques.
     "pla"
 )
 
-# Function to log messages
+# --- Fonction de journalisation ---
+
 function Log-Message {
     param (
         [string]$message,
@@ -77,34 +88,45 @@ function Log-Message {
     Write-Host "[$timestamp] [$type] $message"
 }
 
-# Configure and restart automatic services
+# --- Exécution Principale ---
+
+Log-Message "Début du script de redémarrage des services Exchange."
+
+# Configure et redémarre les services automatiques
+Log-Message "--- Traitement des services automatiques ---"
 foreach ($service in $autoServices) {
     try {
+        # S'assure que le service est configuré en automatique
         Set-Service -Name $service -StartupType Automatic -ErrorAction Stop
-        $serviceStatus = (Get-Service -Name $service).Status
-        if ($serviceStatus -ne 'Running') {
-            Restart-Service -Name $service -Force -ErrorAction Stop
-            Log-Message "Service $service set to start automatically and restarted."
-        } else {
-            Log-Message "Service $service is already running. No need to restart."
-        }
+        Log-Message "Service $service configuré en démarrage Automatique."
+
+        # Redémarre le service
+        Restart-Service -Name $service -Force -ErrorAction Stop
+        Log-Message "Service $service redémarré avec succès."
     } catch {
-        Log-Message "Error configuring or restarting service $service: $_" "ERROR"
+        Log-Message "Erreur lors du traitement du service $service: $_" "ERROR"
     }
 }
 
-# Configure and restart manual services if necessary
+# Configure et redémarre les services manuels si nécessaire
+Log-Message "--- Traitement des services manuels ---"
 foreach ($service in $manualServices) {
     try {
+        # S'assure que le service est configuré en manuel
         Set-Service -Name $service -StartupType Manual -ErrorAction Stop
+        Log-Message "Service $service configuré en démarrage Manuel."
+
+        # Redémarre le service uniquement s'il était déjà en cours d'exécution
         $serviceStatus = (Get-Service -Name $service).Status
         if ($serviceStatus -eq 'Running') {
             Restart-Service -Name $service -Force -ErrorAction Stop
-            Log-Message "Service $service set to start manually and restarted."
+            Log-Message "Service $service (qui était en cours) a été redémarré."
         } else {
-            Log-Message "Service $service set to start manually. No restart needed as it is not running."
+            Log-Message "Service $service n'est pas en cours d'exécution. Aucun redémarrage n'est effectué."
         }
     } catch {
-        Log-Message "Error configuring or restarting service $service: $_" "ERROR"
+        Log-Message "Erreur lors du traitement du service $service: $_" "ERROR"
     }
 }
+
+Log-Message "Script de redémarrage terminé."
